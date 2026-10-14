@@ -2,3 +2,14 @@
 __pycache__/
 *.sqlite3*
 config.json
+.env
+.env.*
+credentials*.txt
+*.key
+*.pem
+*.crt
+*.db
+*.db-wal
+*.db-shm
+*.log
+node_modules/
