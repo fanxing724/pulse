@@ -1,0 +1,3 @@
+# Preserve literal whitespace in the supplied compiled bundles.
+vendor/*.js -whitespace
+public/assets/*.js -whitespace
