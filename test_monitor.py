@@ -14,7 +14,9 @@ class TargetSafetyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         root = Path(cls.tmp.name)
-        (root/'config.json').write_text(json.dumps({}))
+        import hashlib
+        salt='00'*16
+        (root/'config.json').write_text(json.dumps({'password_salt':salt,'password_hash':hashlib.pbkdf2_hmac('sha256',b'admin',bytes.fromhex(salt),200000).hex(),'must_change_password':True}))
         os.environ['PULSE_CONFIG'] = str(root/'config.json')
         os.environ['PULSE_STATE'] = str(root/'state')
         cls.app = importlib.import_module('server')
@@ -41,6 +43,18 @@ class TargetSafetyTests(unittest.TestCase):
         with patch.object(socket,'getaddrinfo',return_value=addresses):
             p,host,result=self.app.validated_url('https://example.com/path')
         self.assertEqual(host,'example.com');self.assertEqual(result,addresses)
+
+    def test_password_verification_and_persistence(self):
+        a=self.app
+        original=a.credentials()
+        self.assertTrue(a.password_matches('admin',original))
+        self.assertFalse(a.password_matches('wrong',original))
+        self.assertTrue(original['must_change'])
+        # Re-initialization must not overwrite the current password with the seed.
+        with a.connection() as c:c.execute('UPDATE admin_credentials SET must_change=0 WHERE id=1')
+        a.initialize()
+        self.assertFalse(a.credentials()['must_change'])
+        with a.connection() as c:c.execute('UPDATE admin_credentials SET must_change=1 WHERE id=1')
 
     def test_redirect_cannot_reach_private_network(self):
         from unittest.mock import MagicMock

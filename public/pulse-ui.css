@@ -1,0 +1,23 @@
+/* Account dialogs live outside the React root and receive the active theme. */
+.pulse-dialog {
+  --surface: #fff;
+  --bg: #f7f9f8;
+  --text: #253b32;
+  --muted: #718078;
+  --border: #e9eeeb;
+  --green: #229f76;
+  --soft: #f5f7f6;
+  --red: #d56b69;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(18, 41, 31, .28);
+  color: var(--text);
+  font-family: Manrope, "Noto Sans SC", system-ui, sans-serif;
+}
+.pulse-dialog .modal { background: var(--surface); opacity: 1; animation:none; }
+.pulse-dialog .pulse-close { font-size: 25px; }
+.pulse-account-actions { display:flex; gap:12px; margin-bottom:24px; flex-wrap:wrap; }
+@media (max-width: 520px) {
+  .pulse-dialog { padding:16px; }
+  .pulse-dialog .modal { padding:24px; width:100%; }
+}

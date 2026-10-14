@@ -59,8 +59,25 @@ def initialize():
         CREATE INDEX IF NOT EXISTS checks_time ON checks(checked_at);
         CREATE INDEX IF NOT EXISTS checks_site_time ON checks(site_id,checked_at);
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, body TEXT);
+        CREATE TABLE IF NOT EXISTS admin_credentials (
+          id INTEGER PRIMARY KEY, salt TEXT NOT NULL, password_hash TEXT NOT NULL,
+          must_change INTEGER NOT NULL DEFAULT 0);
         ''')
         c.execute('INSERT OR IGNORE INTO settings VALUES (1, ?)', (json.dumps(DEFAULTS),))
+        c.execute('INSERT OR IGNORE INTO admin_credentials VALUES (1,?,?,?)',
+                  (CONFIG['password_salt'], CONFIG['password_hash'], int(CONFIG.get('must_change_password', False))))
+
+
+def credentials():
+    with LOCK, connection() as c:
+        return dict(c.execute('SELECT * FROM admin_credentials WHERE id=1').fetchone())
+
+
+def password_matches(password, auth):
+    if not isinstance(password, str) or len(password) > 256:
+        return False
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(auth['salt']), 200000).hex()
+    return hmac.compare_digest(digest, auth['password_hash'])
 
 
 def validated_url(value):
@@ -279,7 +296,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.json_response(snapshot(), public=True)
         elif p == '/api/session':
             s = self.session()
-            self.json_response({'authenticated': bool(s), 'csrf': s['csrf'] if s else None, 'secure': self.secure()})
+            self.json_response({'authenticated': bool(s), 'csrf': s['csrf'] if s else None, 'secure': self.secure(),
+                                'mustChangePassword': bool(s and credentials()['must_change'])})
         elif p == '/healthz':
             self.json_response({'ok': True})
         elif p.startswith('/api/') or any(x.startswith('.') for x in unquote(p).split('/') if x):
@@ -342,11 +360,8 @@ class Handler(SimpleHTTPRequestHandler):
                 if len(recent) >= 8:
                     self.json_response({'error': '尝试过多，请 15 分钟后再试'}, 429)
                     return
-            password = str(body.get('password', ''))
-            if len(password) > 256:
-                raise ValueError('密码过长')
-            digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(CONFIG['password_salt']), 200000).hex()
-            if not hmac.compare_digest(digest, CONFIG['password_hash']):
+            auth = credentials()
+            if not password_matches(body.get('password'), auth):
                 with LOCK:
                     LOGIN_FAILURES[address] = recent + [time.time()]
                     if len(LOGIN_FAILURES) > 1024:
@@ -360,7 +375,7 @@ class Handler(SimpleHTTPRequestHandler):
                     SESSIONS.pop(k)
                 SESSIONS[hashlib.sha256(token.encode()).hexdigest()] = s
             secure_cookie = '; Secure' if isinstance(self.connection, ssl.SSLSocket) or CONFIG.get('origin_secret') else ''
-            self.json_response({'authenticated': True, 'csrf': s['csrf']}, cookie='pulse_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200' + secure_cookie)
+            self.json_response({'authenticated': True, 'csrf': s['csrf'], 'mustChangePassword': bool(auth['must_change'])}, cookie='pulse_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200' + secure_cookie)
             return
         session = self.session()
         if not session:
@@ -369,11 +384,33 @@ class Handler(SimpleHTTPRequestHandler):
         if not hmac.compare_digest(self.headers.get('X-Pulse-CSRF', ''), session['csrf']):
             self.json_response({'error': '请求校验失败，请重新登录'}, 403)
             return
+        if credentials()['must_change'] and p not in ('/api/password', '/api/logout'):
+            self.json_response({'error': '请先修改初始密码，再进行管理操作'}, 403)
+            return
         if p == '/api/logout':
             cookie = SimpleCookie(self.headers.get('Cookie', ''))
             with LOCK:
                 SESSIONS.pop(hashlib.sha256(cookie['pulse_session'].value.encode()).hexdigest(), None)
             self.json_response({'ok': True}, cookie='pulse_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0')
+        elif p == '/api/password':
+            new = body.get('newPassword')
+            if not isinstance(new, str) or not 8 <= len(new) <= 128 or new != new.strip():
+                raise ValueError('新密码需为 8–128 个字符，首尾不能包含空格')
+            with LOCK, connection() as c:
+                auth = dict(c.execute('SELECT * FROM admin_credentials WHERE id=1').fetchone())
+                if not password_matches(body.get('currentPassword'), auth):
+                    self.json_response({'error': '当前密码不正确'}, 401)
+                    return
+                if password_matches(new, auth):
+                    raise ValueError('新密码不能与当前密码相同')
+                salt = secrets.token_hex(16)
+                digest = hashlib.pbkdf2_hmac('sha256', new.encode(), bytes.fromhex(salt), 200000).hex()
+                c.execute('UPDATE admin_credentials SET salt=?,password_hash=?,must_change=0 WHERE id=1', (salt,digest))
+                # Invalidate other browsers while preserving the caller's session.
+                for key in [key for key,value in SESSIONS.items() if value is not session]:
+                    SESSIONS.pop(key)
+                LOGIN_FAILURES.clear()
+            self.json_response({'ok': True, 'mustChangePassword': False})
         elif p in ('/api/sites/save', '/api/sites/delete', '/api/sites/toggle'):
             with LOCK, connection() as c:
                 site_id = body.get('id')
