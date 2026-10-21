@@ -1,3 +1,16 @@
+<!-- fanxing-style:start -->
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="https://fanxing724.github.io/new-make/fanxing724/projects/pulse/cover.light.svg">
+  <img alt="Pulse · 给小站留一盏灯" src="https://fanxing724.github.io/new-make/fanxing724/projects/pulse/cover.svg" width="100%">
+</picture>
+
+**浏览器关了，小站的心跳还在记录。**
+
+个人服务器上的小站，也值得有一个能随时查看的状态面板。Pulse 定时检查网站，把响应、耗时与历史留在一个轻量面板里；保活效果仍取决于目标平台规则。
+
+<sub>番星 / 星轨手记 · <a href="https://fanxing724.github.io/new-make/fanxing724/projects/style.html">风格样板</a> · <a href="https://fanxing724.github.io/">个人小站</a></sub>
+<!-- fanxing-style:end -->
+
 # Pulse · 网站保活与监控
 
 轻量级网站保活与可用性监控面板。使用 Python 标准库和 SQLite，浏览器关闭后仍会定时检查网站，适合部署在小内存服务器上。
